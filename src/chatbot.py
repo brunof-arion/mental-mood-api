@@ -4,14 +4,18 @@ import os
 import random
 import httpx
 from pydantic import BaseModel
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+# Definir el router
+router = APIRouter()
 
 # Modelo para representar un mensaje
 class Message(BaseModel):
-    role: str  # 'system', 'user' o 'assistant'
-    content: str
+    message: str
+    feelings: Optional['Feelings'] = None
+    comment: Optional[str] = None
 
-# Modelo para los sentimientos del usuario
 class Feelings(BaseModel):
     work: int
     health: int
@@ -108,3 +112,17 @@ Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer
 def reset_conversation():
     conversation_history.clear()
     conversation_history.append({"role": "system", "content": system_prompt})
+
+# Endpoint para enviar un mensaje
+@router.post("/chatbot/send_message")
+async def send_message_endpoint(request: Message):
+    response = await send_message_to_chatgpt(
+        request.message, request.feelings, request.comment
+    )
+    return {"response": response}
+
+# Endpoint para reiniciar la conversación
+@router.post("/chatbot/reset_conversation")
+def reset_conversation_endpoint():
+    reset_conversation()
+    return {"status": "Conversación reiniciada"}
