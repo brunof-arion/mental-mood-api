@@ -1,0 +1,22 @@
+meta {
+  name: Convo iniciada
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/chatbot/send_message
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "message": "Que bueno, y como era mi nombre?",
+    "user_id": "el_pepisimo_supremo_supremisimo@arionkoder.com"
+  }
+}

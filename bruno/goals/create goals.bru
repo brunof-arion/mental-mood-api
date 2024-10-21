@@ -1,0 +1,18 @@
+meta {
+  name: create goals
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/goals/
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+      "goal": "entregar la hackatho 2",
+      "user_id": "pepe@arionkoder.com"
+  }
+}

@@ -1,0 +1,29 @@
+meta {
+  name: Mensaje inicial
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/chatbot/send_message
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "message": "Inicia la conversación teniendo en cuenta los sentimientos del usuario.",
+    "feelings": {
+      "work": 3,
+      "health": 2,
+      "relations": 4,
+      "finance": 1
+    },
+    "comment": "Quiero mejorar mi salud y reducir el estrés.",
+    "user_id": "el_pepisimo_supremo_supremisimo@arionkoder.com"
+  }
+}
