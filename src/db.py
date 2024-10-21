@@ -13,5 +13,15 @@ DATABASE_CONFIG = {
     'db': os.getenv('DB_NAME')
 }
 
+db_pool = None
+
+async def init_db_pool():
+    global db_pool
+    db_pool = await aiomysql.create_pool(**DATABASE_CONFIG)
+
+# async def get_db_pool():
+#     return db_pool
+
+
 async def get_db_pool():
     return await aiomysql.create_pool(**DATABASE_CONFIG)

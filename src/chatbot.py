@@ -3,9 +3,11 @@
 import os
 import random
 import httpx
+import aiomysql
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from typing import Optional
+from db import get_db_pool
 
 # Definir el router
 router = APIRouter()
@@ -15,13 +17,14 @@ class Message(BaseModel):
     message: str
     feelings: Optional['Feelings'] = None
     comment: Optional[str] = None
+    user_id: str  # Ahora es obligatorio
 
 class Feelings(BaseModel):
     work: int
     health: int
     relations: int
     finance: int
-    description: str
+
 
 # Prompt del sistema
 system_prompt = """
@@ -57,14 +60,15 @@ conversation_history = [
 ]
 
 # Función para enviar mensajes a ChatGPT
-async def send_message_to_chatgpt(message: str, feelings: Feelings = None, comment: str = None) -> str:
+async def send_message_to_chatgpt(user_id: Optional[str], message: str, feelings: Feelings = None, comment: str = None) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     api_url = "https://api.openai.com/v1/chat/completions"
 
     if not api_key:
         raise HTTPException(status_code=500, detail="La clave de API de OpenAI no está configurada.")
 
-    if feelings and len(conversation_history) == 1:
+    # Si es el primer mensaje y hay feelings, los agregamos al historial
+    if feelings and comment:
         feelings_message = f"""El usuario ha indicado sus sentimientos en las siguientes áreas:
 Trabajo: {feelings.work}/4
 Salud: {feelings.health}/4
@@ -72,9 +76,13 @@ Relaciones: {feelings.relations}/4
 Finanzas: {feelings.finance}/4
 Descripción del sentimiento: {comment}
 Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer apoyo."""
-        conversation_history.append({"role": "user", "content": feelings_message})
+        # Guardar el mensaje en la base de datos
+        await save_message(user_id, 'user', feelings_message)
     else:
-        conversation_history.append({"role": "user", "content": message})
+        await save_message(user_id, 'user', message)
+
+    # Construir el historial de mensajes desde la base de datos
+    conversation_history = await get_conversation_history(user_id)
 
     payload = {
         "model": "gpt-4",
@@ -92,8 +100,11 @@ Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer
             response = await client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
+            print(data)
             assistant_response = data["choices"][0]["message"]["content"]
-            conversation_history.append({"role": "assistant", "content": assistant_response})
+            print(assistant_response)
+            # Guardar la respuesta del asistente en la base de datos
+            await save_message(user_id, 'llm', assistant_response)
             return assistant_response
     except httpx.HTTPError as exc:
         print(f"Error al enviar mensaje a ChatGPT: {exc}")
@@ -105,24 +116,79 @@ Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer
             "Ups, algo salió mal por mi lado. ¿Podrías darme un poco más de contexto sobre tu pregunta mientras intento resolverlo?"
         ]
         random_response = random.choice(mock_responses)
-        conversation_history.append({"role": "assistant", "content": random_response})
+        await save_message(user_id, 'llm', random_response)
         return random_response
+
 
 # Función para reiniciar la conversación
 def reset_conversation():
     conversation_history.clear()
     conversation_history.append({"role": "system", "content": system_prompt})
 
+async def save_message(user_id: int, emitter: str, message: str):
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            sql = """
+                INSERT INTO conversation (user_id, emitter, message)
+                VALUES ( %s, %s, %s)
+            """
+            await cur.execute(sql, (user_id, emitter, message))
+            await conn.commit()
+    # No cerramos el pool aquí para reutilizarlo
+
+
+async def get_conversation_history(user_id: int):
+    history = [{"role": "system", "content": system_prompt}]
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            sql = """
+                SELECT emitter, message
+                FROM conversation
+                WHERE user_id = %s
+                ORDER BY created_at ASC
+            """
+            await cur.execute(sql, (user_id,))
+            rows = await cur.fetchall()
+            for row in rows:
+                role = 'user' if row['emitter'] == 'user' else 'assistant'
+                history.append({"role": role, "content": row['message']})
+    return history
+
+
+async def reset_conversation(user_id: int):
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            sql = """
+                DELETE FROM conversation WHERE user_id = %s
+            """
+            await cur.execute(sql, (user_id,))
+            await conn.commit()
+
 # Endpoint para enviar un mensaje
 @router.post("/chatbot/send_message")
 async def send_message_endpoint(request: Message):
     response = await send_message_to_chatgpt(
-        request.message, request.feelings, request.comment
+        request.user_id, request.message, request.feelings, request.comment
     )
-    return {"response": response}
+    return {
+        "response": response,
+        "user_id": request.user_id
+    }
 
 # Endpoint para reiniciar la conversación
 @router.post("/chatbot/reset_conversation")
-def reset_conversation_endpoint():
-    reset_conversation()
+async def reset_conversation_endpoint(conversation_id: int):
+    await reset_conversation(conversation_id)
     return {"status": "Conversación reiniciada"}
+
+def generate_conversation_id():
+    conversation_id = random.randint(1, 1_000_000)
+    return conversation_id
+
+@router.get("/chatbot/conversation_history/{conversation_id}")
+async def get_conversation_history_endpoint(conversation_id: int):
+    history = await get_conversation_history(conversation_id)
+    return history
