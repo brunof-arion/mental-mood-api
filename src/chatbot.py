@@ -157,7 +157,7 @@ async def get_conversation_history(user_id: int):
     return history
 
 
-async def reset_conversation(user_id: int):
+async def reset_conversation(user_id: str):
     pool = await get_db_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -179,16 +179,7 @@ async def send_message_endpoint(request: Message):
     }
 
 # Endpoint para reiniciar la conversación
-@router.post("/chatbot/reset_conversation")
-async def reset_conversation_endpoint(conversation_id: int):
-    await reset_conversation(conversation_id)
-    return {"status": "Conversación reiniciada"}
-
-def generate_conversation_id():
-    conversation_id = random.randint(1, 1_000_000)
-    return conversation_id
-
-@router.get("/chatbot/conversation_history/{conversation_id}")
-async def get_conversation_history_endpoint(conversation_id: int):
-    history = await get_conversation_history(conversation_id)
-    return history
+@router.get("/chatbot/reset_conversation/{user_id}")
+async def reset_conversation_endpoint(user_id: str):
+    await reset_conversation(user_id)
+    return {"status": "Conversation reset"}
