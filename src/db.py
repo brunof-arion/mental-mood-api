@@ -1,16 +1,23 @@
 import aiomysql
 import os
+from utils import get_secret
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
+
 load_dotenv()
 
+secret_name = os.getenv("SECRET_NAME")
+region_name = os.getenv("REGION_NAME")
+
+secret_value = get_secret(secret_name, region_name)
+
 DATABASE_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'port': int(os.getenv('DB_PORT')),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'db': os.getenv('DB_NAME')
+    'host': secret_value.get('DB_HOST'),
+    'port': int(secret_value.get('DB_PORT')),
+    'user': secret_value.get('DB_USER'),
+    'password': secret_value.get('DB_PASSWORD'),
+    'db': secret_value.get('DB_NAME')
 }
 
 db_pool = None

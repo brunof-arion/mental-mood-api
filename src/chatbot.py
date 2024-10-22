@@ -9,6 +9,10 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional
 from db import get_db_pool
 import requests
+from utils import get_secret
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # Definir el router
@@ -66,7 +70,13 @@ conversation_history = [{"role": "system", "content": system_prompt}]
 async def send_message_to_chatgpt(
     user_id: Optional[str], message: str, feelings: Feelings = None, comment: str = None
 ) -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+    
+    secret_name = os.getenv("SECRET_NAME")
+    region_name = os.getenv("REGION_NAME")
+
+    secret_value = get_secret(secret_name, region_name)
+    
+    api_key = secret_value.get("OPENAI_API_KEY")
     api_url = "https://api.openai.com/v1/chat/completions"
 
     if not api_key:
