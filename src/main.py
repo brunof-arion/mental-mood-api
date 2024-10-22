@@ -1,22 +1,18 @@
-# main.py
-
 from fastapi import FastAPI
 import uvicorn
 from db import get_db_pool
 
-# Importamos los routers
 from goals import router as goals_router
 from chatbot import router as chatbot_router
 
 app = FastAPI()
 
-# Incluimos los routers
 app.include_router(goals_router)
 app.include_router(chatbot_router)
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, World!"}
+    return {"App": "Mental Mood"}
 
 @app.on_event("startup")
 async def startup():

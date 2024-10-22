@@ -1,8 +1,4 @@
-# chatbot.py
-
 import os
-import random
-import httpx
 import aiomysql
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
@@ -15,16 +11,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Definir el router
 router = APIRouter()
 
 
-# Modelo para representar un mensaje
 class Message(BaseModel):
     message: str
     feelings: Optional["Feelings"] = None
     comment: Optional[str] = None
-    user_id: str  # Ahora es obligatorio
+    user_id: str
 
 
 class Feelings(BaseModel):
@@ -34,7 +28,6 @@ class Feelings(BaseModel):
     finance: int
 
 
-# Prompt del sistema
 system_prompt = """
 Actúa como un coach virtual empático y servicial que ayuda a los usuarios a identificar sus sentimientos y objetivos en áreas específicas de su vida, como trabajo, salud, relaciones o finanzas. Tu objetivo es entablar una conversación amable y constructiva, haciendo preguntas abiertas que permitan al usuario reflexionar sobre sus metas y desafíos.
 
@@ -62,20 +55,18 @@ list viene con contenido solo si se está proponiendo una lista de tareas.
 Recuerda adaptar tu lenguaje y estilo de comunicación al del usuario para crear una experiencia más personalizada y efectiva.
 """
 
-# Historial de la conversación
 conversation_history = [{"role": "system", "content": system_prompt}]
 
 
-# Función para enviar mensajes a ChatGPT
 async def send_message_to_chatgpt(
     user_id: Optional[str], message: str, feelings: Feelings = None, comment: str = None
 ) -> str:
-    
+
     secret_name = os.getenv("SECRET_NAME")
     region_name = os.getenv("REGION_NAME")
 
     secret_value = get_secret(secret_name, region_name)
-    
+
     api_key = secret_value.get("OPENAI_API_KEY")
     api_url = "https://api.openai.com/v1/chat/completions"
 
@@ -93,7 +84,6 @@ async def send_message_to_chatgpt(
         Finanzas: {feelings.finance}/4
         Descripción del sentimiento: {comment}
         Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer apoyo."""
-        # Guardar el mensaje en la base de datos
         await save_message(user_id, "user", feelings_message)
     else:
         await save_message(user_id, "user", message)
@@ -105,45 +95,27 @@ async def send_message_to_chatgpt(
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
-        
+
         response = requests.post(api_url, json=payload, headers=headers)
         print("Response status:", response.status_code)
 
-        # Levanta un error si el estado no es exitoso (4xx, 5xx)
         response.raise_for_status()
 
-        # Intenta obtener la respuesta JSON
         try:
             data = response.json()
         except ValueError as json_error:
-            print(f"Error al parsear el JSON: {json_error}")
+            print(f"Error parsing JSON: {json_error}")
             return None
 
         assistant_response = data["choices"][0]["message"]["content"]
-        print("Respuesta del asistente:", assistant_response)
 
-        # Guardar la respuesta en la base de datos
         await save_message(user_id, "llm", assistant_response)
         return assistant_response
 
-    except httpx.HTTPStatusError as http_exc:
-        # Este bloque captura errores relacionados con el código de estado HTTP
-        print(f"HTTP Error: {http_exc}")
-        print(f"Status Code: {http_exc.response.status_code}")
-        print(f"Response Content: {http_exc.response.text}")
-
-    except httpx.RequestError as req_exc:
-        # Este bloque captura errores relacionados con la solicitud (DNS, conexión, etc.)
-        print(f"Request Error: {req_exc}")
-        print(f"Request URL: {req_exc.request.url}")
-        print(f"Excepción completa: {repr(req_exc)}")
-
     except Exception as e:
-        # Captura cualquier otro error no relacionado con httpx
         print(f"Unhandled Error: {e}")
 
 
-# Función para reiniciar la conversación
 def reset_conversation():
     conversation_history.clear()
     conversation_history.append({"role": "system", "content": system_prompt})
@@ -159,7 +131,6 @@ async def save_message(user_id: int, emitter: str, message: str):
             """
             await cur.execute(sql, (user_id, emitter, message))
             await conn.commit()
-    # No cerramos el pool aquí para reutilizarlo
 
 
 async def get_conversation_history(user_id: int):
@@ -192,7 +163,6 @@ async def reset_conversation(user_id: str):
             await conn.commit()
 
 
-# Endpoint para enviar un mensaje
 @router.post("/chatbot/send_message")
 async def send_message_endpoint(request: Message):
     response = await send_message_to_chatgpt(
@@ -201,7 +171,6 @@ async def send_message_endpoint(request: Message):
     return {"response": response, "user_id": request.user_id}
 
 
-# Endpoint para reiniciar la conversación
 @router.get("/chatbot/reset_conversation/{user_id}")
 async def reset_conversation_endpoint(user_id: str):
     await reset_conversation(user_id)
