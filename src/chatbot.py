@@ -8,16 +8,20 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 from db import get_db_pool
+import requests
+
 
 # Definir el router
 router = APIRouter()
 
+
 # Modelo para representar un mensaje
 class Message(BaseModel):
     message: str
-    feelings: Optional['Feelings'] = None
+    feelings: Optional["Feelings"] = None
     comment: Optional[str] = None
     user_id: str  # Ahora es obligatorio
+
 
 class Feelings(BaseModel):
     work: int
@@ -55,75 +59,85 @@ Recuerda adaptar tu lenguaje y estilo de comunicación al del usuario para crear
 """
 
 # Historial de la conversación
-conversation_history = [
-    {"role": "system", "content": system_prompt}
-]
+conversation_history = [{"role": "system", "content": system_prompt}]
+
 
 # Función para enviar mensajes a ChatGPT
-async def send_message_to_chatgpt(user_id: Optional[str], message: str, feelings: Feelings = None, comment: str = None) -> str:
+async def send_message_to_chatgpt(
+    user_id: Optional[str], message: str, feelings: Feelings = None, comment: str = None
+) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     api_url = "https://api.openai.com/v1/chat/completions"
 
     if not api_key:
-        raise HTTPException(status_code=500, detail="La clave de API de OpenAI no está configurada.")
+        raise HTTPException(
+            status_code=500, detail="La clave de API de OpenAI no está configurada."
+        )
 
     # Si es el primer mensaje y hay feelings, los agregamos al historial
     if feelings and comment:
         feelings_message = f"""El usuario ha indicado sus sentimientos en las siguientes áreas:
-Trabajo: {feelings.work}/4
-Salud: {feelings.health}/4
-Relaciones: {feelings.relations}/4
-Finanzas: {feelings.finance}/4
-Descripción del sentimiento: {comment}
-Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer apoyo."""
+        Trabajo: {feelings.work}/4
+        Salud: {feelings.health}/4
+        Relaciones: {feelings.relations}/4
+        Finanzas: {feelings.finance}/4
+        Descripción del sentimiento: {comment}
+        Por favor, ten en cuenta esta información al iniciar la conversación y ofrecer apoyo."""
         # Guardar el mensaje en la base de datos
-        await save_message(user_id, 'user', feelings_message)
+        await save_message(user_id, "user", feelings_message)
     else:
-        await save_message(user_id, 'user', message)
+        await save_message(user_id, "user", message)
 
     # Construir el historial de mensajes desde la base de datos
     conversation_history = await get_conversation_history(user_id)
 
-    payload = {
-        "model": "gpt-4",
-        "messages": conversation_history,
-        "temperature": 0.7
-    }
+    payload = {"model": "gpt-4", "messages": conversation_history, "temperature": 0.7}
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(api_url, json=payload, headers=headers)
-            response.raise_for_status()
+        
+        response = requests.post(api_url, json=payload, headers=headers)
+        print("Response status:", response.status_code)
+
+        # Levanta un error si el estado no es exitoso (4xx, 5xx)
+        response.raise_for_status()
+
+        # Intenta obtener la respuesta JSON
+        try:
             data = response.json()
-            print(data)
-            assistant_response = data["choices"][0]["message"]["content"]
-            print(assistant_response)
-            # Guardar la respuesta del asistente en la base de datos
-            await save_message(user_id, 'llm', assistant_response)
-            return assistant_response
-    except httpx.HTTPError as exc:
-        print(f"Error al enviar mensaje a ChatGPT: {exc}")
-        mock_responses = [
-            "Lo siento, estoy teniendo problemas para procesar tu solicitud en este momento. ¿Podrías intentarlo de nuevo más tarde?",
-            "Parece que hay un problema de conexión. Mientras tanto, ¿puedo ayudarte con algo más general?",
-            "Disculpa, no pude acceder a la información que necesitas ahora mismo. ¿Hay algo más en lo que pueda asistirte?",
-            "Estoy experimentando dificultades técnicas. ¿Te importaría reformular tu pregunta de otra manera?",
-            "Ups, algo salió mal por mi lado. ¿Podrías darme un poco más de contexto sobre tu pregunta mientras intento resolverlo?"
-        ]
-        random_response = random.choice(mock_responses)
-        await save_message(user_id, 'llm', random_response)
-        return random_response
+        except ValueError as json_error:
+            print(f"Error al parsear el JSON: {json_error}")
+            return None
+
+        assistant_response = data["choices"][0]["message"]["content"]
+        print("Respuesta del asistente:", assistant_response)
+
+        # Guardar la respuesta en la base de datos
+        await save_message(user_id, "llm", assistant_response)
+        return assistant_response
+
+    except httpx.HTTPStatusError as http_exc:
+        # Este bloque captura errores relacionados con el código de estado HTTP
+        print(f"HTTP Error: {http_exc}")
+        print(f"Status Code: {http_exc.response.status_code}")
+        print(f"Response Content: {http_exc.response.text}")
+
+    except httpx.RequestError as req_exc:
+        # Este bloque captura errores relacionados con la solicitud (DNS, conexión, etc.)
+        print(f"Request Error: {req_exc}")
+        print(f"Request URL: {req_exc.request.url}")
+        print(f"Excepción completa: {repr(req_exc)}")
+
+    except Exception as e:
+        # Captura cualquier otro error no relacionado con httpx
+        print(f"Unhandled Error: {e}")
 
 
 # Función para reiniciar la conversación
 def reset_conversation():
     conversation_history.clear()
     conversation_history.append({"role": "system", "content": system_prompt})
+
 
 async def save_message(user_id: int, emitter: str, message: str):
     pool = await get_db_pool()
@@ -152,8 +166,8 @@ async def get_conversation_history(user_id: int):
             await cur.execute(sql, (user_id,))
             rows = await cur.fetchall()
             for row in rows:
-                role = 'user' if row['emitter'] == 'user' else 'assistant'
-                history.append({"role": role, "content": row['message']})
+                role = "user" if row["emitter"] == "user" else "assistant"
+                history.append({"role": role, "content": row["message"]})
     return history
 
 
@@ -167,16 +181,15 @@ async def reset_conversation(user_id: str):
             await cur.execute(sql, (user_id,))
             await conn.commit()
 
+
 # Endpoint para enviar un mensaje
 @router.post("/chatbot/send_message")
 async def send_message_endpoint(request: Message):
     response = await send_message_to_chatgpt(
         request.user_id, request.message, request.feelings, request.comment
     )
-    return {
-        "response": response,
-        "user_id": request.user_id
-    }
+    return {"response": response, "user_id": request.user_id}
+
 
 # Endpoint para reiniciar la conversación
 @router.get("/chatbot/reset_conversation/{user_id}")
